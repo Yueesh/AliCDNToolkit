@@ -360,11 +360,11 @@ class CdnService
      */
     public function setTrafficCap($domainName, $period, $threshold, $unit, $unblockTime)
     {
-        return $this->setCappingRule($domainName, 'Traffic', 'Traffic', 'HOUR', $this->convertUsageCapValue($threshold, $unit, [
+        return $this->setCappingRule($domainName, 'Traffic', 'Traffic', $this->mapCappingPeriod($period), $this->convertUsageCapValue($threshold, $unit, [
             'MB' => 1,
             'GB' => 1024,
             'TB' => 1024 * 1024,
-        ]), '流量封顶');
+        ]), $this->mapCappingRecover($unblockTime), '流量封顶');
     }
 
     /**
@@ -381,7 +381,7 @@ class CdnService
             'Mbps' => 1,
             'Gbps' => 1000,
             'Tbps' => 1000 * 1000,
-        ]), '带宽封顶');
+        ]), $this->mapCappingRecover($unblockTime), '带宽封顶');
     }
 
     /**
@@ -395,10 +395,10 @@ class CdnService
      */
     public function setHttpsRequestCap($domainName, $period, $threshold, $unit, $unblockTime)
     {
-        return $this->setCappingRule($domainName, 'RequestHTTPS', 'RequestHTTPS', 'HOUR', $this->convertUsageCapValue($threshold, $unit, [
+        return $this->setCappingRule($domainName, 'RequestHTTPS', 'RequestHTTPS', $this->mapCappingPeriod($period), $this->convertUsageCapValue($threshold, $unit, [
             'million' => 1,
             'billion' => 1000,
-        ]), 'HTTPS请求数封顶');
+        ]), $this->mapCappingRecover($unblockTime), 'HTTPS请求数封顶');
     }
 
     /**
@@ -408,10 +408,11 @@ class CdnService
      * @param string $metric
      * @param string $period
      * @param int $value
+     * @param string $recover
      * @param string $label
      * @return array
      */
-    private function setCappingRule($domainName, $name, $metric, $period, $value, $label)
+    private function setCappingRule($domainName, $name, $metric, $period, $value, $recover, $label)
     {
         try {
             $params = [
@@ -431,7 +432,7 @@ class CdnService
                 'CappingAction' => [
                     'Type' => 'DisableDomain',
                     'Scope' => [$domainName],
-                    'Recover' => 'HOUR',
+                    'Recover' => $recover,
                 ],
             ];
 
@@ -507,6 +508,38 @@ class CdnService
     private function convertUsageCapValue($number, $unit, $unitMultipliers)
     {
         return (int)round((float)$number * $unitMultipliers[$unit]);
+    }
+
+    /**
+     * 映射统计周期到阿里云封顶规则枚举
+     * @param string $period
+     * @return string
+     */
+    private function mapCappingPeriod($period)
+    {
+        $periods = [
+            '5m' => 'MIN5',
+            '1h' => 'HOUR',
+        ];
+
+        return $periods[$period];
+    }
+
+    /**
+     * 映射解封时间到阿里云封顶规则枚举
+     * @param string $unblockTime
+     * @return string
+     */
+    private function mapCappingRecover($unblockTime)
+    {
+        $recoverTimes = [
+            '5m' => 'MIN5',
+            '1h' => 'HOUR',
+            '1d' => 'DAY',
+            '1month' => 'MONTH',
+        ];
+
+        return $recoverTimes[$unblockTime];
     }
 
     /**

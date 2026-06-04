@@ -385,15 +385,15 @@ class DomainController
             return ['valid' => false, 'message' => '请输入有效的封顶阈值'];
         }
 
-        $allowedUnblockTimes = ['1h'];
+        $allowedUnblockTimes = ['5m', '1h', '1d', '1month'];
         if (!in_array($unblockTime, $allowedUnblockTimes, true)) {
-            return ['valid' => false, 'message' => '当前仅支持1小时后自动解封'];
+            return ['valid' => false, 'message' => '请选择有效的解封时间'];
         }
 
         if ($capType !== 'bandwidth') {
-            $allowedPeriods = ['1h'];
+            $allowedPeriods = ['5m', '1h'];
             if (!in_array($period, $allowedPeriods, true)) {
-                return ['valid' => false, 'message' => '当前仅支持每小时统计周期'];
+                return ['valid' => false, 'message' => '请选择有效的统计周期'];
             }
         }
 

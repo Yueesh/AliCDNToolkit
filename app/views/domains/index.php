@@ -219,6 +219,7 @@
                                 <div class="col-md-2 usage-cap-field" style="display: none;">
                                     <label class="form-label fw-bold">统计周期</label>
                                     <select class="form-select" id="capPeriod">
+                                        <option value="5m">5分钟</option>
                                         <option value="1h">1小时</option>
                                     </select>
                                 </div>
@@ -234,7 +235,10 @@
                                 <div class="col-md-2 usage-cap-field" style="display: none;">
                                     <label class="form-label fw-bold">解封时间</label>
                                     <select class="form-select" id="capUnblockTime">
+                                        <option value="5m">5分钟后</option>
                                         <option value="1h">1小时后</option>
+                                        <option value="1d">1天后</option>
+                                        <option value="1month">1月后</option>
                                     </select>
                                 </div>
                                 <div class="col-md-3">
@@ -268,6 +272,9 @@
                                     <button type="button" class="btn btn-outline-secondary" data-page-size="10">10条/页</button>
                                     <button type="button" class="btn btn-outline-secondary" data-page-size="20">20条/页</button>
                                     <button type="button" class="btn btn-outline-secondary" data-page-size="50">50条/页</button>
+                                    <button type="button" class="btn btn-outline-secondary" data-page-size="100">100条/页</button>
+                                    <button type="button" class="btn btn-outline-secondary" data-page-size="200">200条/页</button>
+                                    <button type="button" class="btn btn-outline-secondary" data-page-size="500">500条/页</button>
                                 </div>
                             </div>
                         </div>
