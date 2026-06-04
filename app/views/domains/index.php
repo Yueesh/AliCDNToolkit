@@ -205,6 +205,10 @@
                                         <option value="traffic">设置流量封顶</option>
                                         <option value="bandwidth">设置带宽封顶</option>
                                         <option value="https_request">设置HTTPS请求数封顶</option>
+                                        <option value="ip_black">设置IP黑名单</option>
+                                        <option value="ip_white">设置IP白名单</option>
+                                        <option value="ua_black">设置UA黑名单</option>
+                                        <option value="ua_white">设置UA白名单</option>
                                     </select>
                                 </div>
                                 <div class="col-md-4" id="sourceField">
@@ -241,6 +245,12 @@
                                         <option value="1month">1月后</option>
                                     </select>
                                 </div>
+                                <div class="col-md-5" id="accessControlField" style="display: none;">
+                                    <label class="form-label fw-bold" id="accessControlLabel">访问控制规则</label>
+                                    <textarea class="form-control" id="accessControlRules" rows="3"
+                                              placeholder="输入规则，多个规则可换行"></textarea>
+                                    <small class="text-muted" id="accessControlHelp"></small>
+                                </div>
                                 <div class="col-md-3">
                                     <div class="d-flex gap-2">
                                         <button type="button" class="btn btn-primary btn-lg" id="batchUpdateBtn">
@@ -258,6 +268,7 @@
                                 <div class="progress-bar progress-bar-striped progress-bar-animated"
                                      role="progressbar" style="width: 0%"></div>
                             </div>
+                            <small class="text-muted mt-1 d-block" id="batchProgressText" style="display: none;"></small>
                         </div>
 
                         <!-- 结果统计 -->
@@ -448,6 +459,8 @@
         let selectedDomains = [];
         let currentPage = 1;
         let pageSize = 10;
+        const batchRequestSize = 10;
+        const batchRequestDelay = 500;
 
         // DOM元素
         const selectAllCheckbox = document.getElementById('selectAll');
@@ -463,6 +476,11 @@
         const capThresholdInput = document.getElementById('capThreshold');
         const capUnitSelect = document.getElementById('capUnit');
         const capUnblockTimeSelect = document.getElementById('capUnblockTime');
+        const accessControlField = document.getElementById('accessControlField');
+        const accessControlLabel = document.getElementById('accessControlLabel');
+        const accessControlRulesInput = document.getElementById('accessControlRules');
+        const accessControlHelp = document.getElementById('accessControlHelp');
+        const batchProgressText = document.getElementById('batchProgressText');
         const searchDomainInput = document.getElementById('searchDomain');
         const searchSourceInput = document.getElementById('searchSource');
         const clearSearchBtn = document.getElementById('clearSearch');
@@ -501,6 +519,34 @@
                     { value: 'billion', label: '十亿次' }
                 ],
                 warning: '注意：HTTPS请求数封顶触发后域名将被下线，监控数据约有10分钟延迟，请确认阈值合理。'
+            },
+            ip_black: {
+                label: 'IP黑名单',
+                buttonText: '批量设置IP黑名单',
+                help: '支持IP或CIDR，多个规则可用逗号或换行分隔。',
+                placeholder: '例如：192.168.0.1\\n192.168.1.0/24',
+                warning: '注意：IP黑名单中的IP将被拒绝访问；如果已配置IP白名单，阿里云可能返回配置冲突。'
+            },
+            ip_white: {
+                label: 'IP白名单',
+                buttonText: '批量设置IP白名单',
+                help: '支持IP或CIDR，多个规则可用逗号或换行分隔。',
+                placeholder: '例如：192.168.0.1\\n192.168.1.0/24',
+                warning: '注意：启用IP白名单后，仅名单内IP可访问；如果已配置IP黑名单，阿里云可能返回配置冲突。'
+            },
+            ua_black: {
+                label: 'UA黑名单',
+                buttonText: '批量设置UA黑名单',
+                help: '支持通配符*，多个规则可用竖线(|)或换行分隔。',
+                placeholder: '例如：*curl*\\n*bot*',
+                warning: '注意：匹配UA黑名单的请求将被拒绝；UA黑白名单互斥。'
+            },
+            ua_white: {
+                label: 'UA白名单',
+                buttonText: '批量设置UA白名单',
+                help: '支持通配符*，多个规则可用竖线(|)或换行分隔。',
+                placeholder: '例如：*Chrome*\\n*Firefox*',
+                warning: '注意：启用UA白名单后，仅匹配UA规则的请求可访问；UA黑白名单互斥。'
             }
         };
 
@@ -612,24 +658,41 @@
 
         batchOperationSelect.addEventListener('change', updateBatchOperationFields);
 
+        function isUsageCapOperation(operation) {
+            return ['traffic', 'bandwidth', 'https_request'].includes(operation);
+        }
+
+        function isAccessControlOperation(operation) {
+            return ['ip_black', 'ip_white', 'ua_black', 'ua_white'].includes(operation);
+        }
+
         function updateBatchOperationFields() {
             const operation = batchOperationSelect.value;
             const isSourceOperation = operation === 'source';
+            const isUsageCap = isUsageCapOperation(operation);
+            const isAccessControl = isAccessControlOperation(operation);
             const usageCapFields = document.querySelectorAll('.usage-cap-field');
             const config = capOperationConfig[operation];
 
             sourceField.style.display = isSourceOperation ? '' : 'none';
             usageCapFields.forEach(field => {
-                field.style.display = isSourceOperation ? 'none' : '';
+                field.style.display = isUsageCap ? '' : 'none';
             });
+            accessControlField.style.display = isAccessControl ? '' : 'none';
 
             capPeriodSelect.closest('.usage-cap-field').style.display =
-                (!isSourceOperation && operation !== 'bandwidth') ? '' : 'none';
+                (isUsageCap && operation !== 'bandwidth') ? '' : 'none';
 
-            if (!isSourceOperation) {
+            if (isUsageCap) {
                 capUnitSelect.innerHTML = config.units.map(unit =>
                     `<option value="${unit.value}">${unit.label}</option>`
                 ).join('');
+            }
+
+            if (isAccessControl) {
+                accessControlLabel.textContent = `${config.label}规则`;
+                accessControlRulesInput.placeholder = config.placeholder;
+                accessControlHelp.textContent = config.help;
             }
 
             batchUpdateBtn.innerHTML = `<i class="${config.icon || 'fas fa-shield-alt'}"></i> ${config.buttonText}`;
@@ -648,6 +711,174 @@
             }
 
             return `${config.label}：统计周期${periodLabel}，阈值${threshold} ${unitLabel}，${unblockLabel}自动解封`;
+        }
+
+        function splitAccessControlRules(value, pattern) {
+            return value.split(pattern).map(item => item.trim()).filter(Boolean);
+        }
+
+        function isValidIpOrCidr(value) {
+            const ipRegex = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.|$)){4}$/;
+            const ipv6Regex = /^[0-9a-fA-F:]+$/;
+            const parts = value.split('/');
+            const ip = parts[0];
+
+            if (parts.length > 2 || !ip) {
+                return false;
+            }
+
+            const isIpv4 = ipRegex.test(ip);
+            const isIpv6 = ipv6Regex.test(ip) && ip.includes(':');
+            if (!isIpv4 && !isIpv6) {
+                return false;
+            }
+
+            if (parts.length === 1) {
+                return true;
+            }
+
+            const prefix = Number(parts[1]);
+            if (!Number.isInteger(prefix)) {
+                return false;
+            }
+
+            if (isIpv4) {
+                return prefix >= 0 && prefix <= 32 && value !== '0.0.0.0/0';
+            }
+
+            return prefix >= 0 && prefix <= 128 && value !== '::/0';
+        }
+
+        function normalizeAccessControlRules() {
+            const operation = batchOperationSelect.value;
+            const rawRules = accessControlRulesInput.value.trim();
+            const isIpList = operation === 'ip_black' || operation === 'ip_white';
+            const rules = splitAccessControlRules(rawRules, isIpList ? /[\r\n,]+/ : /[\r\n|]+/);
+
+            if (rules.length === 0) {
+                return { valid: false, message: isIpList ? '请输入IP地址或CIDR地址段' : '请输入UA规则' };
+            }
+
+            if (isIpList) {
+                const invalidRule = rules.find(rule => !isValidIpOrCidr(rule));
+                if (invalidRule) {
+                    return { valid: false, message: `无效的IP地址或CIDR地址段：${invalidRule}` };
+                }
+                return { valid: true, value: [...new Set(rules)].join(',') };
+            }
+
+            return { valid: true, value: [...new Set(rules)].join('|') };
+        }
+
+        function getAccessControlSummary() {
+            const config = capOperationConfig[batchOperationSelect.value];
+            const normalized = normalizeAccessControlRules();
+            return `${config.label}：${normalized.value || accessControlRulesInput.value.trim()}`;
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        function splitIntoBatches(items, size) {
+            const batches = [];
+            for (let i = 0; i < items.length; i += size) {
+                batches.push(items.slice(i, i + size));
+            }
+            return batches;
+        }
+
+        function updateBatchProgress(completed, total, batchIndex, batchTotal) {
+            const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+            const progressBar = document.querySelector('#updateProgress .progress-bar');
+
+            progressBar.style.width = `${percent}%`;
+            progressBar.setAttribute('aria-valuenow', percent);
+            batchProgressText.textContent = `正在分批处理：第 ${batchIndex}/${batchTotal} 批，已完成 ${completed}/${total} 个域名`;
+        }
+
+        function buildBatchRequest(operation, domains, context) {
+            const formData = new FormData();
+            formData.append('domains', JSON.stringify(domains));
+            formData.append('csrf_token', document.getElementById('csrfToken').value);
+
+            let requestUrl = '?action=batchUpdate';
+            if (operation === 'source') {
+                formData.append('new_source', context.newSource);
+            } else if (context.isUsageCap) {
+                requestUrl = '?action=batchSetUsageCap';
+                formData.append('cap_type', operation);
+                formData.append('period', capPeriodSelect.value);
+                formData.append('threshold', capThresholdInput.value.trim());
+                formData.append('unit', capUnitSelect.value);
+                formData.append('unblock_time', capUnblockTimeSelect.value);
+            } else {
+                requestUrl = '?action=batchSetAccessControl';
+                formData.append('access_type', operation);
+                formData.append('rules', context.accessRules);
+            }
+
+            return { requestUrl, formData };
+        }
+
+        function isFatalBatchError(data) {
+            return !data.success && ['未登录', 'CSRF token验证失败'].includes(data.message);
+        }
+
+        async function submitBatchRequests(operation, context) {
+            const domains = [...selectedDomains];
+            const batches = splitIntoBatches(domains, batchRequestSize);
+            const allResults = [];
+
+            for (let i = 0; i < batches.length; i++) {
+                const batchDomains = batches[i];
+                updateBatchProgress(i * batchRequestSize, domains.length, i + 1, batches.length);
+
+                const { requestUrl, formData } = buildBatchRequest(operation, batchDomains, context);
+                const response = await fetch(requestUrl, {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`请求失败，HTTP状态码：${response.status}`);
+                }
+
+                const data = await response.json();
+                if (isFatalBatchError(data)) {
+                    throw new Error(data.message);
+                }
+
+                if (data.results && data.results.length > 0) {
+                    allResults.push(...data.results);
+                } else {
+                    const message = data.message || '本批次未返回逐域名结果';
+                    batchDomains.forEach(domain => {
+                        allResults.push({
+                            domain,
+                            success: Boolean(data.success),
+                            message
+                        });
+                    });
+                }
+
+                updateBatchProgress(Math.min((i + 1) * batchRequestSize, domains.length), domains.length, i + 1, batches.length);
+
+                if (i < batches.length - 1) {
+                    await sleep(batchRequestDelay);
+                }
+            }
+
+            const successCount = allResults.filter(result => result.success).length;
+            const failCount = allResults.length - successCount;
+            return {
+                success: failCount === 0,
+                message: `分批处理完成：成功 ${successCount} 个，失败 ${failCount} 个`,
+                results: allResults
+            };
         }
 
         function validateUsageCapInput() {
@@ -690,6 +921,9 @@
         batchUpdateBtn.addEventListener('click', function() {
             const operation = batchOperationSelect.value;
             const newSource = newSourceInput.value.trim();
+            const isUsageCap = isUsageCapOperation(operation);
+            const isAccessControl = isAccessControlOperation(operation);
+            const accessValidation = isAccessControl ? normalizeAccessControlRules() : null;
 
             if (operation === 'source' && !newSource) {
                 alert('请输入新的源站地址');
@@ -697,7 +931,13 @@
                 return;
             }
 
-            if (operation !== 'source' && !validateUsageCapInput()) {
+            if (isUsageCap && !validateUsageCapInput()) {
+                return;
+            }
+
+            if (isAccessControl && !accessValidation.valid) {
+                alert(accessValidation.message);
+                accessControlRulesInput.focus();
                 return;
             }
 
@@ -713,7 +953,7 @@
             document.getElementById('confirmMessage').textContent =
                 operation === 'source' ? '您确定要将以下域名的源站更新为：' : `您确定要为以下域名设置${config.label}：`;
             document.getElementById('confirmNewSource').textContent =
-                operation === 'source' ? newSource : getUsageCapSummary();
+                operation === 'source' ? newSource : (isUsageCap ? getUsageCapSummary() : getAccessControlSummary());
             document.getElementById('confirmWarning').innerHTML =
                 `<i class="fas fa-info-circle"></i> ${operation === 'source' ? '注意：源站修改可能影响线上服务，请确认操作正确！' : config.warning}`;
             document.getElementById('confirmDomains').innerHTML =
@@ -732,6 +972,9 @@
             const operation = batchOperationSelect.value;
             const config = capOperationConfig[operation];
             const newSource = newSourceInput.value.trim();
+            const isUsageCap = isUsageCapOperation(operation);
+            const isAccessControl = isAccessControlOperation(operation);
+            const accessValidation = isAccessControl ? normalizeAccessControlRules() : null;
 
             // 移除焦点以避免aria-hidden冲突
             this.blur();
@@ -743,40 +986,24 @@
             const progressBar = document.querySelector('#updateProgress .progress-bar');
             const progressContainer = document.getElementById('updateProgress');
             progressContainer.style.display = 'block';
+            batchProgressText.style.display = 'block';
             progressBar.style.width = '0%';
+            progressBar.setAttribute('aria-valuenow', 0);
+            batchProgressText.textContent = '准备分批处理...';
 
             // 禁用更新按钮
             batchUpdateBtn.disabled = true;
             batchUpdateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 处理中...';
 
-            // 发送批量更新请求
-            const formData = new FormData();
-            formData.append('domains', JSON.stringify(selectedDomains));
-            formData.append('csrf_token', document.getElementById('csrfToken').value);
-
-            let requestUrl = '?action=batchUpdate';
-            if (operation === 'source') {
-                formData.append('new_source', newSource);
-            } else {
-                requestUrl = '?action=batchSetUsageCap';
-                formData.append('cap_type', operation);
-                formData.append('period', capPeriodSelect.value);
-                formData.append('threshold', capThresholdInput.value.trim());
-                formData.append('unit', capUnitSelect.value);
-                formData.append('unblock_time', capUnblockTimeSelect.value);
-            }
-
-            fetch(requestUrl, {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest'
-                }
+            submitBatchRequests(operation, {
+                newSource,
+                isUsageCap,
+                accessRules: accessValidation ? accessValidation.value : ''
             })
-            .then(response => response.json())
             .then(data => {
                 // 隐藏进度条
                 progressContainer.style.display = 'none';
+                batchProgressText.style.display = 'none';
 
                 // 显示结果
                 showResults(data, config.label);
@@ -786,6 +1013,7 @@
             })
             .catch(error => {
                 progressContainer.style.display = 'none';
+                batchProgressText.style.display = 'none';
                 alert('批量操作失败: ' + error.message);
             })
             .finally(() => {

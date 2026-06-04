@@ -543,6 +543,123 @@ class CdnService
     }
 
     /**
+     * 设置IP/UA黑白名单访问控制
+     * @param string $domainName
+     * @param string $accessType
+     * @param string $rules
+     * @return array
+     */
+    public function setAccessControl($domainName, $accessType, $rules)
+    {
+        $configs = [
+            'ip_black' => [
+                'function' => 'ip_black_list_set',
+                'args' => ['ip_list' => $rules],
+                'label' => 'IP黑名单',
+            ],
+            'ip_white' => [
+                'function' => 'ip_allow_list_set',
+                'args' => ['ip_list' => $rules],
+                'label' => 'IP白名单',
+            ],
+            'ua_black' => [
+                'function' => 'ali_ua',
+                'args' => ['ua' => $rules, 'type' => 'black'],
+                'label' => 'UA黑名单',
+            ],
+            'ua_white' => [
+                'function' => 'ali_ua',
+                'args' => ['ua' => $rules, 'type' => 'white'],
+                'label' => 'UA白名单',
+            ],
+        ];
+
+        $config = $configs[$accessType] ?? null;
+        if ($config === null) {
+            return [
+                'success' => false,
+                'message' => '无效的访问控制类型'
+            ];
+        }
+
+        return $this->setDomainConfig($domainName, $config['function'], $config['args'], $config['label']);
+    }
+
+    /**
+     * 设置CDN域名配置
+     * @param string $domainName
+     * @param string $functionName
+     * @param array $args
+     * @param string $label
+     * @return array
+     */
+    private function setDomainConfig($domainName, $functionName, $args, $label)
+    {
+        try {
+            $functionArgs = [];
+            foreach ($args as $argName => $argValue) {
+                $functionArgs[] = [
+                    'argName' => $argName,
+                    'argValue' => (string)$argValue,
+                ];
+            }
+
+            $functions = [[
+                'functionName' => $functionName,
+                'functionArgs' => $functionArgs,
+            ]];
+
+            AlibabaCloud::rpc()
+                ->client('cdn')
+                ->product('Cdn')
+                ->version('2018-05-10')
+                ->action('BatchSetCdnDomainConfig')
+                ->method('POST')
+                ->scheme('https')
+                ->host('cdn.aliyuncs.com')
+                ->options([
+                    'query' => [
+                        'DomainNames' => $domainName,
+                        'Functions' => json_encode($functions, JSON_UNESCAPED_UNICODE),
+                    ],
+                ])
+                ->request();
+
+            return [
+                'success' => true,
+                'message' => $label . '设置成功'
+            ];
+        } catch (Exception $e) {
+            return [
+                'success' => false,
+                'message' => $this->formatDomainConfigError($e->getMessage())
+            ];
+        }
+    }
+
+    /**
+     * 格式化CDN域名配置错误信息
+     * @param string $errorMessage
+     * @return string
+     */
+    private function formatDomainConfigError($errorMessage)
+    {
+        if (strpos($errorMessage, 'Forbidden') !== false) {
+            return '权限不足：AccessKey没有CDN写入权限，请在阿里云RAM控制台添加相应权限';
+        }
+
+        if (strpos($errorMessage, 'InvalidParameter') !== false || strpos($errorMessage, 'MissingParameter') !== false) {
+            return '参数错误：访问控制配置参数格式不正确';
+        }
+
+        if (strpos($errorMessage, 'ConfigAlreadyExists') !== false || strpos($errorMessage, 'FunctionConflict') !== false || strpos($errorMessage, 'Conflict') !== false) {
+            return '配置冲突：黑白名单互斥，请先在阿里云CDN控制台删除相反类型配置。阿里云原始错误: ' . $errorMessage;
+        }
+
+        return '设置失败: ' . $errorMessage;
+    }
+
+    /**
      * 验证源站
      * @param string $source
      * @return array

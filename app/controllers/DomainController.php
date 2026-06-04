@@ -441,6 +441,169 @@ class DomainController
     }
 
     /**
+     * 批量设置访问控制
+     */
+    public function batchSetAccessControl()
+    {
+        if (ob_get_length()) ob_clean();
+
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!$this->isAuthenticated()) {
+            echo json_encode(['success' => false, 'message' => '未登录']);
+            exit;
+        }
+
+        if (!$this->validateCsrfToken($_POST['csrf_token'] ?? '')) {
+            echo json_encode(['success' => false, 'message' => 'CSRF token验证失败']);
+            exit;
+        }
+
+        $domainsParam = $_POST['domains'] ?? [];
+        if (is_string($domainsParam)) {
+            $domains = json_decode($domainsParam, true) ?? [];
+        } else {
+            $domains = $domainsParam;
+        }
+
+        $accessType = trim($_POST['access_type'] ?? '');
+        $rules = trim($_POST['rules'] ?? '');
+        $validation = $this->validateAccessControlParams($domains, $accessType, $rules);
+        if (!$validation['valid']) {
+            echo json_encode(['success' => false, 'message' => $validation['message']], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        try {
+            $cdnService = $this->initCdnService();
+            $results = [];
+            $successCount = 0;
+            $failCount = 0;
+            $label = $this->getAccessControlLabel($accessType);
+
+            foreach ($domains as $domain) {
+                $result = $cdnService->setAccessControl($domain, $accessType, $validation['rules']);
+                $results[] = [
+                    'domain' => $domain,
+                    'success' => $result['success'],
+                    'message' => $result['message']
+                ];
+
+                if ($result['success']) {
+                    $successCount++;
+                } else {
+                    $failCount++;
+                }
+
+                usleep(200000);
+            }
+
+            echo json_encode([
+                'success' => $failCount === 0,
+                'message' => "{$label}设置完成：成功 {$successCount} 个，失败 {$failCount} 个",
+                'results' => $results
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Exception $e) {
+            error_log("批量设置访问控制异常: " . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => '批量设置访问控制失败: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
+        }
+
+        exit;
+    }
+
+    /**
+     * 验证访问控制参数
+     */
+    private function validateAccessControlParams($domains, $accessType, $rules)
+    {
+        if (empty($domains) || !is_array($domains)) {
+            return ['valid' => false, 'message' => '请选择要设置的域名'];
+        }
+
+        $allowedTypes = ['ip_black', 'ip_white', 'ua_black', 'ua_white'];
+        if (!in_array($accessType, $allowedTypes, true)) {
+            return ['valid' => false, 'message' => '请选择有效的访问控制类型'];
+        }
+
+        if (strpos($accessType, 'ip_') === 0) {
+            $items = $this->splitAccessControlRules($rules, '/[\r\n,]+/');
+            if (empty($items)) {
+                return ['valid' => false, 'message' => '请输入IP地址或CIDR地址段'];
+            }
+
+            foreach ($items as $item) {
+                if (!$this->isValidIpOrCidr($item)) {
+                    return ['valid' => false, 'message' => "无效的IP地址或CIDR地址段: {$item}"];
+                }
+            }
+
+            return ['valid' => true, 'rules' => implode(',', $items)];
+        }
+
+        $items = $this->splitAccessControlRules($rules, '/[\r\n|]+/');
+        if (empty($items)) {
+            return ['valid' => false, 'message' => '请输入UA规则'];
+        }
+
+        return ['valid' => true, 'rules' => implode('|', $items)];
+    }
+
+    /**
+     * 拆分并清理访问控制规则
+     */
+    private function splitAccessControlRules($rules, $pattern)
+    {
+        $items = preg_split($pattern, $rules);
+        $items = array_map('trim', $items ?: []);
+        $items = array_filter($items, function ($item) {
+            return $item !== '';
+        });
+
+        return array_values(array_unique($items));
+    }
+
+    /**
+     * 验证IP或CIDR
+     */
+    private function isValidIpOrCidr($value)
+    {
+        if (filter_var($value, FILTER_VALIDATE_IP)) {
+            return true;
+        }
+
+        if (strpos($value, '/') === false) {
+            return false;
+        }
+
+        [$ip, $prefix] = explode('/', $value, 2);
+        if (!filter_var($ip, FILTER_VALIDATE_IP) || $prefix === '' || !ctype_digit($prefix)) {
+            return false;
+        }
+
+        $prefixLength = (int)$prefix;
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return $prefixLength >= 0 && $prefixLength <= 32 && $value !== '0.0.0.0/0';
+        }
+
+        return $prefixLength >= 0 && $prefixLength <= 128 && $value !== '::/0';
+    }
+
+    /**
+     * 获取访问控制类型名称
+     */
+    private function getAccessControlLabel($accessType)
+    {
+        $labels = [
+            'ip_black' => 'IP黑名单',
+            'ip_white' => 'IP白名单',
+            'ua_black' => 'UA黑名单',
+            'ua_white' => 'UA白名单',
+        ];
+
+        return $labels[$accessType] ?? '访问控制';
+    }
+
+    /**
      * 处理API认证
      */
     public function authenticate()

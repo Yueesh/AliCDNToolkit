@@ -44,6 +44,9 @@ try {
         case 'batchSetUsageCap':
             $controller->batchSetUsageCap();
             break;
+        case 'batchSetAccessControl':
+            $controller->batchSetAccessControl();
+            break;
         case 'logout':
             $controller->logout();
             break;
