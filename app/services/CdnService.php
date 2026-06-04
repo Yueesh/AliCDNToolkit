@@ -441,6 +441,7 @@ class CdnService
                 ->version('2018-05-10')
                 ->action('SetCappingRule')
                 ->method('POST')
+                ->scheme('https')
                 ->host('cdn.aliyuncs.com')
                 ->options([
                     'query' => [
@@ -475,6 +476,10 @@ class CdnService
     {
         if (strpos($errorMessage, 'Forbidden') !== false) {
             return '权限不足：AccessKey没有CDN写入权限，请在阿里云RAM控制台添加相应权限';
+        }
+
+        if (strpos($errorMessage, 'InvalidProtocol.NeedSsl') !== false) {
+            return '阿里云要求该接口必须使用HTTPS，请确认当前阿里云SDK支持HTTPS scheme设置。阿里云原始错误: ' . $errorMessage;
         }
 
         if (strpos($errorMessage, 'InvalidAction.NotFound') !== false || strpos($errorMessage, 'InvalidAction') !== false) {
