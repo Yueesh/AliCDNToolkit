@@ -360,13 +360,11 @@ class CdnService
      */
     public function setTrafficCap($domainName, $period, $threshold, $unit, $unblockTime)
     {
-        return $this->setUsageCapConfig($domainName, 'traffic_limit', [
-            'switch' => 'on',
-            'statistic_cycle' => $period,
-            'limit_value' => $this->formatNumber($threshold),
-            'limit_unit' => $unit,
-            'unblock_time' => $unblockTime,
-        ], '流量封顶');
+        return $this->setCappingRule($domainName, 'Traffic', 'Traffic', 'HOUR', $this->convertUsageCapValue($threshold, $unit, [
+            'MB' => 1,
+            'GB' => 1024,
+            'TB' => 1024 * 1024,
+        ]), '流量封顶');
     }
 
     /**
@@ -379,12 +377,11 @@ class CdnService
      */
     public function setBandwidthCap($domainName, $threshold, $unit, $unblockTime)
     {
-        return $this->setUsageCapConfig($domainName, 'bandwidth_limit', [
-            'switch' => 'on',
-            'limit_value' => $this->formatNumber($threshold),
-            'limit_unit' => $unit,
-            'unblock_time' => $unblockTime,
-        ], '带宽封顶');
+        return $this->setCappingRule($domainName, 'Bandwidth', 'Bandwidth', 'MIN5', $this->convertUsageCapValue($threshold, $unit, [
+            'Mbps' => 1,
+            'Gbps' => 1000,
+            'Tbps' => 1000 * 1000,
+        ]), '带宽封顶');
     }
 
     /**
@@ -398,50 +395,61 @@ class CdnService
      */
     public function setHttpsRequestCap($domainName, $period, $threshold, $unit, $unblockTime)
     {
-        return $this->setUsageCapConfig($domainName, 'https_request_limit', [
-            'switch' => 'on',
-            'statistic_cycle' => $period,
-            'limit_value' => $this->formatNumber($threshold),
-            'limit_unit' => $unit,
-            'unblock_time' => $unblockTime,
-        ], 'HTTPS请求数封顶');
+        return $this->setCappingRule($domainName, 'RequestHTTPS', 'RequestHTTPS', 'HOUR', $this->convertUsageCapValue($threshold, $unit, [
+            'million' => 1,
+            'billion' => 1000,
+        ]), 'HTTPS请求数封顶');
     }
 
     /**
-     * 设置用量封顶配置
+     * 设置用量封顶规则
      * @param string $domainName
-     * @param string $functionName
-     * @param array $args
+     * @param string $name
+     * @param string $metric
+     * @param string $period
+     * @param int $value
      * @param string $label
      * @return array
      */
-    private function setUsageCapConfig($domainName, $functionName, $args, $label)
+    private function setCappingRule($domainName, $name, $metric, $period, $value, $label)
     {
         try {
-            $functionArgs = [];
-            foreach ($args as $name => $value) {
-                $functionArgs[] = [
-                    'argName' => $name,
-                    'argValue' => (string)$value,
-                ];
-            }
-
-            $functions = [[
-                'functionName' => $functionName,
-                'functionArgs' => $functionArgs,
-            ]];
+            $params = [
+                'DomainName' => $domainName,
+                'CreateOnly' => false,
+                'Name' => $name,
+                'SimpleDescription' => [
+                    'Elements' => [[
+                        'Metric' => $metric,
+                        'Value' => $value,
+                        'Dimension' => 'Domain',
+                        'DimensionValue' => $domainName,
+                        'Comparison' => 'gt',
+                    ]],
+                ],
+                'Period' => $period,
+                'CappingAction' => [
+                    'Type' => 'DisableDomain',
+                    'Scope' => [$domainName],
+                    'Recover' => 'HOUR',
+                ],
+            ];
 
             AlibabaCloud::rpc()
                 ->client('cdn')
                 ->product('Cdn')
                 ->version('2018-05-10')
-                ->action('BatchSetCdnDomainConfig')
+                ->action('SetCappingRule')
                 ->method('POST')
                 ->host('cdn.aliyuncs.com')
                 ->options([
                     'query' => [
-                        'DomainNames' => $domainName,
-                        'Functions' => json_encode($functions, JSON_UNESCAPED_UNICODE),
+                        'DomainName' => $domainName,
+                        'CreateOnly' => false,
+                        'Name' => $name,
+                        'SimpleDescription' => json_encode($params['SimpleDescription'], JSON_UNESCAPED_UNICODE),
+                        'Period' => $period,
+                        'CappingAction' => json_encode($params['CappingAction'], JSON_UNESCAPED_UNICODE),
                     ],
                 ])
                 ->request();
@@ -469,11 +477,11 @@ class CdnService
             return '权限不足：AccessKey没有CDN写入权限，请在阿里云RAM控制台添加相应权限';
         }
 
-        if (strpos($errorMessage, 'InvalidFunction') !== false || strpos($errorMessage, 'FunctionNotSupported') !== false) {
-            return '当前域名或账号暂不支持该用量封顶配置，请在阿里云CDN控制台确认功能是否可用';
+        if (strpos($errorMessage, 'InvalidAction.NotFound') !== false || strpos($errorMessage, 'InvalidAction') !== false) {
+            return '当前API方式不可用：SetCappingRule可能仅开放给阿里云控制台网关，请在CDN控制台的“流量限制 > 用量封顶”中设置。阿里云原始错误: ' . $errorMessage;
         }
 
-        if (strpos($errorMessage, 'FunctionArg') !== false || strpos($errorMessage, 'InvalidParameter') !== false) {
+        if (strpos($errorMessage, 'InvalidParameter') !== false || strpos($errorMessage, 'MissingParameter') !== false) {
             return '参数错误：用量封顶配置参数格式不正确';
         }
 
@@ -485,17 +493,15 @@ class CdnService
     }
 
     /**
-     * 格式化数字，避免把整数传成1.0
+     * 转换用量封顶阈值为阿里云规则内部单位
      * @param float|int|string $number
-     * @return string
+     * @param string $unit
+     * @param array $unitMultipliers
+     * @return int
      */
-    private function formatNumber($number)
+    private function convertUsageCapValue($number, $unit, $unitMultipliers)
     {
-        if (is_numeric($number) && floor((float)$number) == (float)$number) {
-            return (string)(int)$number;
-        }
-
-        return (string)$number;
+        return (int)round((float)$number * $unitMultipliers[$unit]);
     }
 
     /**

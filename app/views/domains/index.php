@@ -220,8 +220,6 @@
                                     <label class="form-label fw-bold">统计周期</label>
                                     <select class="form-select" id="capPeriod">
                                         <option value="1h">1小时</option>
-                                        <option value="1d">1天</option>
-                                        <option value="1m">1个月</option>
                                     </select>
                                 </div>
                                 <div class="col-md-2 usage-cap-field" style="display: none;">
@@ -237,10 +235,6 @@
                                     <label class="form-label fw-bold">解封时间</label>
                                     <select class="form-select" id="capUnblockTime">
                                         <option value="1h">1小时后</option>
-                                        <option value="3h">3小时后</option>
-                                        <option value="6h">6小时后</option>
-                                        <option value="12h">12小时后</option>
-                                        <option value="24h">24小时后</option>
                                     </select>
                                 </div>
                                 <div class="col-md-3">
