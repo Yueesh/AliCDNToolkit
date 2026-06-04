@@ -194,8 +194,20 @@
                     <div class="card-body">
                         <!-- 批量操作区域 -->
                         <div class="batch-actions" id="batchActions">
-                            <div class="row align-items-center">
-                                <div class="col-md-5">
+                            <div class="row g-3 align-items-end">
+                                <div class="col-md-3">
+                                    <label class="form-label fw-bold">
+                                        <i class="fas fa-tasks"></i>
+                                        批量操作
+                                    </label>
+                                    <select class="form-select" id="batchOperation">
+                                        <option value="source">设置源站</option>
+                                        <option value="traffic">设置流量封顶</option>
+                                        <option value="bandwidth">设置带宽封顶</option>
+                                        <option value="https_request">设置HTTPS请求数封顶</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4" id="sourceField">
                                     <label class="form-label fw-bold">
                                         <i class="fas fa-edit"></i>
                                         新源站地址
@@ -204,18 +216,39 @@
                                            placeholder="输入IP地址或域名">
                                     <small class="text-muted">支持IP地址和域名格式</small>
                                 </div>
-                                <div class="col-md-4">
-                                    <label class="form-label">&nbsp;</label>
-                                    <div>
+                                <div class="col-md-2 usage-cap-field" style="display: none;">
+                                    <label class="form-label fw-bold">统计周期</label>
+                                    <select class="form-select" id="capPeriod">
+                                        <option value="1h">1小时</option>
+                                        <option value="1d">1天</option>
+                                        <option value="1m">1个月</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2 usage-cap-field" style="display: none;">
+                                    <label class="form-label fw-bold">阈值</label>
+                                    <input type="number" class="form-control" id="capThreshold" min="1" step="1"
+                                           placeholder="输入阈值">
+                                </div>
+                                <div class="col-md-2 usage-cap-field" style="display: none;">
+                                    <label class="form-label fw-bold">单位</label>
+                                    <select class="form-select" id="capUnit"></select>
+                                </div>
+                                <div class="col-md-2 usage-cap-field" style="display: none;">
+                                    <label class="form-label fw-bold">解封时间</label>
+                                    <select class="form-select" id="capUnblockTime">
+                                        <option value="1h">1小时后</option>
+                                        <option value="3h">3小时后</option>
+                                        <option value="6h">6小时后</option>
+                                        <option value="12h">12小时后</option>
+                                        <option value="24h">24小时后</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="d-flex gap-2">
                                         <button type="button" class="btn btn-primary btn-lg" id="batchUpdateBtn">
                                             <i class="fas fa-save"></i>
                                             批量更新源站
                                         </button>
-                                    </div>
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label">&nbsp;</label>
-                                    <div>
                                         <button type="button" class="btn btn-outline-secondary" id="clearSelection">
                                             <i class="fas fa-times"></i>
                                             清除选择
@@ -347,18 +380,18 @@
                 <div class="modal-header">
                     <h5 class="modal-title" id="confirmModalLabel">
                         <i class="fas fa-exclamation-triangle text-warning"></i>
-                        确认批量更新
+                        确认批量操作
                     </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭确认对话框"></button>
                 </div>
                 <div class="modal-body">
-                    <p>您确定要将以下域名的源站更新为：</p>
+                    <p id="confirmMessage">您确定要执行以下批量操作：</p>
                     <div class="alert alert-primary">
                         <strong id="confirmNewSource"></strong>
                     </div>
                     <div id="confirmDomains"></div>
                     <hr>
-                    <p class="text-warning">
+                    <p class="text-warning" id="confirmWarning">
                         <i class="fas fa-info-circle"></i>
                         注意：源站修改可能影响线上服务，请确认操作正确！
                     </p>
@@ -422,10 +455,53 @@
         const refreshBtn = document.getElementById('refreshBtn');
         const batchUpdateBtn = document.getElementById('batchUpdateBtn');
         const clearSelectionBtn = document.getElementById('clearSelection');
+        const batchOperationSelect = document.getElementById('batchOperation');
+        const sourceField = document.getElementById('sourceField');
         const newSourceInput = document.getElementById('newSource');
+        const capPeriodSelect = document.getElementById('capPeriod');
+        const capThresholdInput = document.getElementById('capThreshold');
+        const capUnitSelect = document.getElementById('capUnit');
+        const capUnblockTimeSelect = document.getElementById('capUnblockTime');
         const searchDomainInput = document.getElementById('searchDomain');
         const searchSourceInput = document.getElementById('searchSource');
         const clearSearchBtn = document.getElementById('clearSearch');
+
+        const capOperationConfig = {
+            source: {
+                label: '批量更新源站',
+                buttonText: '批量更新源站',
+                icon: 'fas fa-save'
+            },
+            traffic: {
+                label: '流量封顶',
+                buttonText: '批量设置流量封顶',
+                units: [
+                    { value: 'MB', label: 'MB' },
+                    { value: 'GB', label: 'GB' },
+                    { value: 'TB', label: 'TB' }
+                ],
+                warning: '注意：流量封顶触发后域名将被下线，监控数据约有10分钟延迟，请确认阈值合理。'
+            },
+            bandwidth: {
+                label: '带宽封顶',
+                buttonText: '批量设置带宽封顶',
+                units: [
+                    { value: 'Mbps', label: 'Mbps' },
+                    { value: 'Gbps', label: 'Gbps' },
+                    { value: 'Tbps', label: 'Tbps' }
+                ],
+                warning: '注意：带宽封顶触发后域名将被下线，监控数据约有10分钟延迟，请确认阈值合理。'
+            },
+            https_request: {
+                label: 'HTTPS请求数封顶',
+                buttonText: '批量设置HTTPS请求数封顶',
+                units: [
+                    { value: 'million', label: '百万次' },
+                    { value: 'billion', label: '十亿次' }
+                ],
+                warning: '注意：HTTPS请求数封顶触发后域名将被下线，监控数据约有10分钟延迟，请确认阈值合理。'
+            }
+        };
 
         // 初始化
         document.addEventListener('DOMContentLoaded', function() {
@@ -433,6 +509,7 @@
             filteredDomains = [...allDomains];
             renderTable();
             updateSelectedCount();
+            updateBatchOperationFields();
 
             // 修复所有关闭按钮的aria-hidden冲突问题
             const closeButtons = document.querySelectorAll('[data-bs-dismiss="modal"]');
@@ -532,23 +609,112 @@
             });
         });
 
+        batchOperationSelect.addEventListener('change', updateBatchOperationFields);
+
+        function updateBatchOperationFields() {
+            const operation = batchOperationSelect.value;
+            const isSourceOperation = operation === 'source';
+            const usageCapFields = document.querySelectorAll('.usage-cap-field');
+            const config = capOperationConfig[operation];
+
+            sourceField.style.display = isSourceOperation ? '' : 'none';
+            usageCapFields.forEach(field => {
+                field.style.display = isSourceOperation ? 'none' : '';
+            });
+
+            capPeriodSelect.closest('.usage-cap-field').style.display =
+                (!isSourceOperation && operation !== 'bandwidth') ? '' : 'none';
+
+            if (!isSourceOperation) {
+                capUnitSelect.innerHTML = config.units.map(unit =>
+                    `<option value="${unit.value}">${unit.label}</option>`
+                ).join('');
+            }
+
+            batchUpdateBtn.innerHTML = `<i class="${config.icon || 'fas fa-shield-alt'}"></i> ${config.buttonText}`;
+        }
+
+        function getUsageCapSummary() {
+            const operation = batchOperationSelect.value;
+            const config = capOperationConfig[operation];
+            const threshold = capThresholdInput.value.trim();
+            const unitLabel = capUnitSelect.options[capUnitSelect.selectedIndex]?.textContent || '';
+            const unblockLabel = capUnblockTimeSelect.options[capUnblockTimeSelect.selectedIndex]?.textContent || '';
+            const periodLabel = capPeriodSelect.options[capPeriodSelect.selectedIndex]?.textContent || '';
+
+            if (operation === 'bandwidth') {
+                return `${config.label}：${threshold} ${unitLabel}，${unblockLabel}自动解封`;
+            }
+
+            return `${config.label}：统计周期${periodLabel}，阈值${threshold} ${unitLabel}，${unblockLabel}自动解封`;
+        }
+
+        function validateUsageCapInput() {
+            const operation = batchOperationSelect.value;
+            const threshold = parseFloat(capThresholdInput.value);
+            const unit = capUnitSelect.value;
+
+            if (!capThresholdInput.value || Number.isNaN(threshold) || threshold <= 0) {
+                alert('请输入有效的封顶阈值');
+                capThresholdInput.focus();
+                return false;
+            }
+
+            const trafficMultipliers = { MB: 1, GB: 1024, TB: 1024 * 1024 };
+            const bandwidthMultipliers = { Mbps: 1, Gbps: 1000, Tbps: 1000 * 1000 };
+            const requestMultipliers = { million: 1, billion: 1000 };
+
+            if (operation === 'traffic' && threshold * trafficMultipliers[unit] > 10000 * 1024 * 1024) {
+                alert('流量封顶阈值范围为1 MB ~ 10000 TB');
+                capThresholdInput.focus();
+                return false;
+            }
+
+            if (operation === 'bandwidth' && threshold * bandwidthMultipliers[unit] > 1000 * 1000) {
+                alert('带宽封顶阈值范围为1 Mbps ~ 1 Tbps');
+                capThresholdInput.focus();
+                return false;
+            }
+
+            if (operation === 'https_request' && threshold * requestMultipliers[unit] > 10000) {
+                alert('HTTPS请求数封顶阈值范围为100万次 ~ 100亿次');
+                capThresholdInput.focus();
+                return false;
+            }
+
+            return true;
+        }
+
         // 批量更新
         batchUpdateBtn.addEventListener('click', function() {
+            const operation = batchOperationSelect.value;
             const newSource = newSourceInput.value.trim();
 
-            if (!newSource) {
+            if (operation === 'source' && !newSource) {
                 alert('请输入新的源站地址');
                 newSourceInput.focus();
                 return;
             }
 
+            if (operation !== 'source' && !validateUsageCapInput()) {
+                return;
+            }
+
             if (selectedDomains.length === 0) {
-                alert('请选择要更新的域名');
+                alert('请选择要操作的域名');
                 return;
             }
 
             // 显示确认对话框
-            document.getElementById('confirmNewSource').textContent = newSource;
+            const config = capOperationConfig[operation];
+            document.getElementById('confirmModalLabel').innerHTML =
+                `<i class="fas fa-exclamation-triangle text-warning"></i> 确认${config.label}`;
+            document.getElementById('confirmMessage').textContent =
+                operation === 'source' ? '您确定要将以下域名的源站更新为：' : `您确定要为以下域名设置${config.label}：`;
+            document.getElementById('confirmNewSource').textContent =
+                operation === 'source' ? newSource : getUsageCapSummary();
+            document.getElementById('confirmWarning').innerHTML =
+                `<i class="fas fa-info-circle"></i> ${operation === 'source' ? '注意：源站修改可能影响线上服务，请确认操作正确！' : config.warning}`;
             document.getElementById('confirmDomains').innerHTML =
                 '<div class="list-group">' +
                 selectedDomains.map(domain =>
@@ -562,6 +728,8 @@
 
         // 确认更新
         document.getElementById('confirmUpdate').addEventListener('click', function() {
+            const operation = batchOperationSelect.value;
+            const config = capOperationConfig[operation];
             const newSource = newSourceInput.value.trim();
 
             // 移除焦点以避免aria-hidden冲突
@@ -578,15 +746,26 @@
 
             // 禁用更新按钮
             batchUpdateBtn.disabled = true;
-            batchUpdateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 更新中...';
+            batchUpdateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 处理中...';
 
             // 发送批量更新请求
             const formData = new FormData();
             formData.append('domains', JSON.stringify(selectedDomains));
-            formData.append('new_source', newSource);
             formData.append('csrf_token', document.getElementById('csrfToken').value);
 
-            fetch('?action=batchUpdate', {
+            let requestUrl = '?action=batchUpdate';
+            if (operation === 'source') {
+                formData.append('new_source', newSource);
+            } else {
+                requestUrl = '?action=batchSetUsageCap';
+                formData.append('cap_type', operation);
+                formData.append('period', capPeriodSelect.value);
+                formData.append('threshold', capThresholdInput.value.trim());
+                formData.append('unit', capUnitSelect.value);
+                formData.append('unblock_time', capUnblockTimeSelect.value);
+            }
+
+            fetch(requestUrl, {
                 method: 'POST',
                 body: formData,
                 headers: {
@@ -599,24 +778,26 @@
                 progressContainer.style.display = 'none';
 
                 // 显示结果
-                showResults(data);
+                showResults(data, config.label);
 
                 // 清除选择
                 clearSelectionBtn.click();
             })
             .catch(error => {
                 progressContainer.style.display = 'none';
-                alert('批量更新失败: ' + error.message);
+                alert('批量操作失败: ' + error.message);
             })
             .finally(() => {
                 batchUpdateBtn.disabled = false;
-                batchUpdateBtn.innerHTML = '<i class="fas fa-save"></i> 批量更新源站';
+                updateBatchOperationFields();
             });
         });
 
         // 显示更新结果
-        function showResults(data) {
+        function showResults(data, operationLabel = '批量更新') {
             let resultHtml = '';
+            document.getElementById('resultModalLabel').innerHTML =
+                `<i class="fas fa-check-circle text-success"></i> ${operationLabel}结果`;
 
             if (data.success) {
                 resultHtml += `

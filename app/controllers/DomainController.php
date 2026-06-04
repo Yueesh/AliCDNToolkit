@@ -286,6 +286,161 @@ class DomainController
     }
 
     /**
+     * 批量设置用量封顶
+     */
+    public function batchSetUsageCap()
+    {
+        if (ob_get_length()) ob_clean();
+
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!$this->isAuthenticated()) {
+            echo json_encode(['success' => false, 'message' => '未登录']);
+            exit;
+        }
+
+        if (!$this->validateCsrfToken($_POST['csrf_token'] ?? '')) {
+            echo json_encode(['success' => false, 'message' => 'CSRF token验证失败']);
+            exit;
+        }
+
+        $domainsParam = $_POST['domains'] ?? [];
+        if (is_string($domainsParam)) {
+            $domains = json_decode($domainsParam, true) ?? [];
+        } else {
+            $domains = $domainsParam;
+        }
+
+        $capType = trim($_POST['cap_type'] ?? '');
+        $period = trim($_POST['period'] ?? '');
+        $threshold = trim($_POST['threshold'] ?? '');
+        $unit = trim($_POST['unit'] ?? '');
+        $unblockTime = trim($_POST['unblock_time'] ?? '');
+
+        $validation = $this->validateUsageCapParams($domains, $capType, $period, $threshold, $unit, $unblockTime);
+        if (!$validation['valid']) {
+            echo json_encode(['success' => false, 'message' => $validation['message']]);
+            exit;
+        }
+
+        try {
+            $cdnService = $this->initCdnService();
+            $results = [];
+            $successCount = 0;
+            $failCount = 0;
+            $label = $this->getUsageCapLabel($capType);
+
+            foreach ($domains as $domain) {
+                if ($capType === 'traffic') {
+                    $result = $cdnService->setTrafficCap($domain, $period, (float)$threshold, $unit, $unblockTime);
+                } elseif ($capType === 'bandwidth') {
+                    $result = $cdnService->setBandwidthCap($domain, (float)$threshold, $unit, $unblockTime);
+                } else {
+                    $result = $cdnService->setHttpsRequestCap($domain, $period, (float)$threshold, $unit, $unblockTime);
+                }
+
+                $results[] = [
+                    'domain' => $domain,
+                    'success' => $result['success'],
+                    'message' => $result['message']
+                ];
+
+                if ($result['success']) {
+                    $successCount++;
+                } else {
+                    $failCount++;
+                }
+
+                usleep(200000);
+            }
+
+            echo json_encode([
+                'success' => $failCount === 0,
+                'message' => "{$label}设置完成：成功 {$successCount} 个，失败 {$failCount} 个",
+                'results' => $results
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Exception $e) {
+            error_log("批量设置用量封顶异常: " . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => '批量设置用量封顶失败: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
+        }
+
+        exit;
+    }
+
+    /**
+     * 验证用量封顶参数
+     */
+    private function validateUsageCapParams($domains, $capType, $period, $threshold, $unit, $unblockTime)
+    {
+        if (empty($domains) || !is_array($domains)) {
+            return ['valid' => false, 'message' => '请选择要设置的域名'];
+        }
+
+        $allowedTypes = ['traffic', 'bandwidth', 'https_request'];
+        if (!in_array($capType, $allowedTypes, true)) {
+            return ['valid' => false, 'message' => '请选择有效的封顶类型'];
+        }
+
+        if ($threshold === '' || !is_numeric($threshold) || (float)$threshold <= 0) {
+            return ['valid' => false, 'message' => '请输入有效的封顶阈值'];
+        }
+
+        $allowedUnblockTimes = ['1h', '3h', '6h', '12h', '24h'];
+        if (!in_array($unblockTime, $allowedUnblockTimes, true)) {
+            return ['valid' => false, 'message' => '请选择有效的解封时间'];
+        }
+
+        if ($capType !== 'bandwidth') {
+            $allowedPeriods = ['1h', '1d', '1m'];
+            if (!in_array($period, $allowedPeriods, true)) {
+                return ['valid' => false, 'message' => '请选择有效的统计周期'];
+            }
+        }
+
+        $value = (float)$threshold;
+        if ($capType === 'traffic') {
+            return $this->validateUsageCapRange($value, $unit, ['MB' => 1, 'GB' => 1024, 'TB' => 1024 * 1024], 1, 10000 * 1024 * 1024, '流量封顶阈值范围为1 MB ~ 10000 TB');
+        }
+
+        if ($capType === 'bandwidth') {
+            return $this->validateUsageCapRange($value, $unit, ['Mbps' => 1, 'Gbps' => 1000, 'Tbps' => 1000 * 1000], 1, 1000 * 1000, '带宽封顶阈值范围为1 Mbps ~ 1 Tbps');
+        }
+
+        return $this->validateUsageCapRange($value, $unit, ['million' => 1, 'billion' => 1000], 1, 10000, 'HTTPS请求数封顶阈值范围为100万次 ~ 100亿次');
+    }
+
+    /**
+     * 验证用量封顶阈值范围
+     */
+    private function validateUsageCapRange($value, $unit, $unitMultipliers, $minBaseValue, $maxBaseValue, $message)
+    {
+        if (!isset($unitMultipliers[$unit])) {
+            return ['valid' => false, 'message' => '请选择有效的阈值单位'];
+        }
+
+        $baseValue = $value * $unitMultipliers[$unit];
+        if ($baseValue < $minBaseValue || $baseValue > $maxBaseValue) {
+            return ['valid' => false, 'message' => $message];
+        }
+
+        return ['valid' => true, 'message' => ''];
+    }
+
+    /**
+     * 获取用量封顶类型名称
+     */
+    private function getUsageCapLabel($capType)
+    {
+        $labels = [
+            'traffic' => '流量封顶',
+            'bandwidth' => '带宽封顶',
+            'https_request' => 'HTTPS请求数封顶',
+        ];
+
+        return $labels[$capType] ?? '用量封顶';
+    }
+
+    /**
      * 处理API认证
      */
     public function authenticate()

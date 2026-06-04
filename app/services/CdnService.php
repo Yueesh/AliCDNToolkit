@@ -350,6 +350,155 @@ class CdnService
     }
 
     /**
+     * 设置流量封顶
+     * @param string $domainName
+     * @param string $period
+     * @param float $threshold
+     * @param string $unit
+     * @param string $unblockTime
+     * @return array
+     */
+    public function setTrafficCap($domainName, $period, $threshold, $unit, $unblockTime)
+    {
+        return $this->setUsageCapConfig($domainName, 'traffic_limit', [
+            'switch' => 'on',
+            'statistic_cycle' => $period,
+            'limit_value' => $this->formatNumber($threshold),
+            'limit_unit' => $unit,
+            'unblock_time' => $unblockTime,
+        ], '流量封顶');
+    }
+
+    /**
+     * 设置带宽封顶
+     * @param string $domainName
+     * @param float $threshold
+     * @param string $unit
+     * @param string $unblockTime
+     * @return array
+     */
+    public function setBandwidthCap($domainName, $threshold, $unit, $unblockTime)
+    {
+        return $this->setUsageCapConfig($domainName, 'bandwidth_limit', [
+            'switch' => 'on',
+            'limit_value' => $this->formatNumber($threshold),
+            'limit_unit' => $unit,
+            'unblock_time' => $unblockTime,
+        ], '带宽封顶');
+    }
+
+    /**
+     * 设置HTTPS请求数封顶
+     * @param string $domainName
+     * @param string $period
+     * @param float $threshold
+     * @param string $unit
+     * @param string $unblockTime
+     * @return array
+     */
+    public function setHttpsRequestCap($domainName, $period, $threshold, $unit, $unblockTime)
+    {
+        return $this->setUsageCapConfig($domainName, 'https_request_limit', [
+            'switch' => 'on',
+            'statistic_cycle' => $period,
+            'limit_value' => $this->formatNumber($threshold),
+            'limit_unit' => $unit,
+            'unblock_time' => $unblockTime,
+        ], 'HTTPS请求数封顶');
+    }
+
+    /**
+     * 设置用量封顶配置
+     * @param string $domainName
+     * @param string $functionName
+     * @param array $args
+     * @param string $label
+     * @return array
+     */
+    private function setUsageCapConfig($domainName, $functionName, $args, $label)
+    {
+        try {
+            $functionArgs = [];
+            foreach ($args as $name => $value) {
+                $functionArgs[] = [
+                    'argName' => $name,
+                    'argValue' => (string)$value,
+                ];
+            }
+
+            $functions = [[
+                'functionName' => $functionName,
+                'functionArgs' => $functionArgs,
+            ]];
+
+            AlibabaCloud::rpc()
+                ->client('cdn')
+                ->product('Cdn')
+                ->version('2018-05-10')
+                ->action('BatchSetCdnDomainConfig')
+                ->method('POST')
+                ->host('cdn.aliyuncs.com')
+                ->options([
+                    'query' => [
+                        'DomainNames' => $domainName,
+                        'Functions' => json_encode($functions, JSON_UNESCAPED_UNICODE),
+                    ],
+                ])
+                ->request();
+
+            return [
+                'success' => true,
+                'message' => $label . '设置成功'
+            ];
+        } catch (Exception $e) {
+            return [
+                'success' => false,
+                'message' => $this->formatUsageCapError($e->getMessage())
+            ];
+        }
+    }
+
+    /**
+     * 格式化用量封顶错误信息
+     * @param string $errorMessage
+     * @return string
+     */
+    private function formatUsageCapError($errorMessage)
+    {
+        if (strpos($errorMessage, 'Forbidden') !== false) {
+            return '权限不足：AccessKey没有CDN写入权限，请在阿里云RAM控制台添加相应权限';
+        }
+
+        if (strpos($errorMessage, 'InvalidFunction') !== false || strpos($errorMessage, 'FunctionNotSupported') !== false) {
+            return '当前域名或账号暂不支持该用量封顶配置，请在阿里云CDN控制台确认功能是否可用';
+        }
+
+        if (strpos($errorMessage, 'FunctionArg') !== false || strpos($errorMessage, 'InvalidParameter') !== false) {
+            return '参数错误：用量封顶配置参数格式不正确';
+        }
+
+        if (strpos($errorMessage, 'InvalidDomain') !== false) {
+            return '域名无效或不属于当前账号';
+        }
+
+        return '设置失败: ' . $errorMessage;
+    }
+
+    /**
+     * 格式化数字，避免把整数传成1.0
+     * @param float|int|string $number
+     * @return string
+     */
+    private function formatNumber($number)
+    {
+        if (is_numeric($number) && floor((float)$number) == (float)$number) {
+            return (string)(int)$number;
+        }
+
+        return (string)$number;
+    }
+
+    /**
      * 验证源站
      * @param string $source
      * @return array
