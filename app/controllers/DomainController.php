@@ -604,6 +604,100 @@ class DomainController
     }
 
     /**
+     * 批量设置IPv6开关
+     */
+    public function batchSetIpv6()
+    {
+        if (ob_get_length()) ob_clean();
+
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!$this->isAuthenticated()) {
+            echo json_encode(['success' => false, 'message' => '未登录']);
+            exit;
+        }
+
+        if (!$this->validateCsrfToken($_POST['csrf_token'] ?? '')) {
+            echo json_encode(['success' => false, 'message' => 'CSRF token验证失败']);
+            exit;
+        }
+
+        $domainsParam = $_POST['domains'] ?? [];
+        if (is_string($domainsParam)) {
+            $domains = json_decode($domainsParam, true) ?? [];
+        } else {
+            $domains = $domainsParam;
+        }
+
+        $status = trim($_POST['ipv6_status'] ?? '');
+        $validation = $this->validateIpv6Params($domains, $status);
+        if (!$validation['valid']) {
+            echo json_encode(['success' => false, 'message' => $validation['message']], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        try {
+            $cdnService = $this->initCdnService();
+            $results = [];
+            $successCount = 0;
+            $failCount = 0;
+            $label = $this->getIpv6Label($status);
+
+            foreach ($domains as $domain) {
+                $result = $cdnService->setIpv6($domain, $status);
+                $results[] = [
+                    'domain' => $domain,
+                    'success' => $result['success'],
+                    'message' => $result['message']
+                ];
+
+                if ($result['success']) {
+                    $successCount++;
+                } else {
+                    $failCount++;
+                }
+
+                usleep(200000);
+            }
+
+            echo json_encode([
+                'success' => $failCount === 0,
+                'message' => "{$label}完成：成功 {$successCount} 个，失败 {$failCount} 个",
+                'results' => $results
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Exception $e) {
+            error_log("批量设置IPv6开关异常: " . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => '批量设置IPv6开关失败: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
+        }
+
+        exit;
+    }
+
+    /**
+     * 验证IPv6开关参数
+     */
+    private function validateIpv6Params($domains, $status)
+    {
+        if (empty($domains) || !is_array($domains)) {
+            return ['valid' => false, 'message' => '请选择要设置的域名'];
+        }
+
+        if (!in_array($status, ['on', 'off'], true)) {
+            return ['valid' => false, 'message' => '请选择有效的IPv6开关状态'];
+        }
+
+        return ['valid' => true];
+    }
+
+    /**
+     * 获取IPv6开关操作名称
+     */
+    private function getIpv6Label($status)
+    {
+        return $status === 'on' ? '开启IPv6' : '关闭IPv6';
+    }
+
+    /**
      * 处理API认证
      */
     public function authenticate()

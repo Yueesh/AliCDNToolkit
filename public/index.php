@@ -47,6 +47,9 @@ try {
         case 'batchSetAccessControl':
             $controller->batchSetAccessControl();
             break;
+        case 'batchSetIpv6':
+            $controller->batchSetIpv6();
+            break;
         case 'logout':
             $controller->logout();
             break;

@@ -586,6 +586,29 @@ class CdnService
     }
 
     /**
+     * 设置IPv6访问开关
+     * @param string $domainName
+     * @param string $status
+     * @return array
+     */
+    public function setIpv6($domainName, $status)
+    {
+        if (!in_array($status, ['on', 'off'], true)) {
+            return [
+                'success' => false,
+                'message' => '无效的IPv6开关状态'
+            ];
+        }
+
+        $label = $status === 'on' ? 'IPv6开启' : 'IPv6关闭';
+
+        return $this->setDomainConfig($domainName, 'ipv6', [
+            'switch' => $status,
+            'region' => '*',
+        ], $label);
+    }
+
+    /**
      * 设置CDN域名配置
      * @param string $domainName
      * @param string $functionName
@@ -632,7 +655,7 @@ class CdnService
         } catch (Exception $e) {
             return [
                 'success' => false,
-                'message' => $this->formatDomainConfigError($e->getMessage())
+                'message' => $this->formatDomainConfigError($e->getMessage(), $label)
             ];
         }
     }
@@ -640,20 +663,25 @@ class CdnService
     /**
      * 格式化CDN域名配置错误信息
      * @param string $errorMessage
+     * @param string $label
      * @return string
      */
-    private function formatDomainConfigError($errorMessage)
+    private function formatDomainConfigError($errorMessage, $label)
     {
         if (strpos($errorMessage, 'Forbidden') !== false) {
             return '权限不足：AccessKey没有CDN写入权限，请在阿里云RAM控制台添加相应权限';
         }
 
         if (strpos($errorMessage, 'InvalidParameter') !== false || strpos($errorMessage, 'MissingParameter') !== false) {
-            return '参数错误：访问控制配置参数格式不正确';
+            return '参数错误：' . $label . '配置参数格式不正确';
         }
 
         if (strpos($errorMessage, 'ConfigAlreadyExists') !== false || strpos($errorMessage, 'FunctionConflict') !== false || strpos($errorMessage, 'Conflict') !== false) {
-            return '配置冲突：黑白名单互斥，请先在阿里云CDN控制台删除相反类型配置。阿里云原始错误: ' . $errorMessage;
+            if (strpos($label, '黑名单') !== false || strpos($label, '白名单') !== false) {
+                return '配置冲突：黑白名单互斥，请先在阿里云CDN控制台删除相反类型配置。阿里云原始错误: ' . $errorMessage;
+            }
+
+            return '配置冲突：当前域名已有冲突配置，请在阿里云CDN控制台确认后重试。阿里云原始错误: ' . $errorMessage;
         }
 
         return '设置失败: ' . $errorMessage;

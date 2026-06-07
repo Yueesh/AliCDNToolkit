@@ -209,6 +209,7 @@
                                         <option value="ip_white">设置IP白名单</option>
                                         <option value="ua_black">设置UA黑名单</option>
                                         <option value="ua_white">设置UA白名单</option>
+                                        <option value="ipv6">设置IPv6开关</option>
                                     </select>
                                 </div>
                                 <div class="col-md-4" id="sourceField">
@@ -250,6 +251,14 @@
                                     <textarea class="form-control" id="accessControlRules" rows="3"
                                               placeholder="输入规则，多个规则可换行"></textarea>
                                     <small class="text-muted" id="accessControlHelp"></small>
+                                </div>
+                                <div class="col-md-3" id="ipv6Field" style="display: none;">
+                                    <label class="form-label fw-bold">IPv6开关</label>
+                                    <select class="form-select" id="ipv6Status">
+                                        <option value="on">开启IPv6</option>
+                                        <option value="off">关闭IPv6</option>
+                                    </select>
+                                    <small class="text-muted">控制客户端IPv6访问，不影响IPv6回源。</small>
                                 </div>
                                 <div class="col-md-3">
                                     <div class="d-flex gap-2">
@@ -480,6 +489,8 @@
         const accessControlLabel = document.getElementById('accessControlLabel');
         const accessControlRulesInput = document.getElementById('accessControlRules');
         const accessControlHelp = document.getElementById('accessControlHelp');
+        const ipv6Field = document.getElementById('ipv6Field');
+        const ipv6StatusSelect = document.getElementById('ipv6Status');
         const batchProgressText = document.getElementById('batchProgressText');
         const searchDomainInput = document.getElementById('searchDomain');
         const searchSourceInput = document.getElementById('searchSource');
@@ -547,6 +558,11 @@
                 help: '支持通配符*，多个规则可用竖线(|)或换行分隔。',
                 placeholder: '例如：*Chrome*\\n*Firefox*',
                 warning: '注意：启用UA白名单后，仅匹配UA规则的请求可访问；UA黑白名单互斥。'
+            },
+            ipv6: {
+                label: 'IPv6开关',
+                buttonText: '批量设置IPv6开关',
+                warning: '注意：该操作控制客户端IPv6访问，不是IPv6回源配置。'
             }
         };
 
@@ -666,11 +682,16 @@
             return ['ip_black', 'ip_white', 'ua_black', 'ua_white'].includes(operation);
         }
 
+        function isIpv6Operation(operation) {
+            return operation === 'ipv6';
+        }
+
         function updateBatchOperationFields() {
             const operation = batchOperationSelect.value;
             const isSourceOperation = operation === 'source';
             const isUsageCap = isUsageCapOperation(operation);
             const isAccessControl = isAccessControlOperation(operation);
+            const isIpv6 = isIpv6Operation(operation);
             const usageCapFields = document.querySelectorAll('.usage-cap-field');
             const config = capOperationConfig[operation];
 
@@ -679,6 +700,7 @@
                 field.style.display = isUsageCap ? '' : 'none';
             });
             accessControlField.style.display = isAccessControl ? '' : 'none';
+            ipv6Field.style.display = isIpv6 ? '' : 'none';
 
             capPeriodSelect.closest('.usage-cap-field').style.display =
                 (isUsageCap && operation !== 'bandwidth') ? '' : 'none';
@@ -776,6 +798,27 @@
             return `${config.label}：${normalized.value || accessControlRulesInput.value.trim()}`;
         }
 
+        function getIpv6Summary() {
+            const statusLabel = ipv6StatusSelect.options[ipv6StatusSelect.selectedIndex]?.textContent || '';
+            return `IPv6开关：${statusLabel}`;
+        }
+
+        function getBatchOperationSummary(operation, isUsageCap, isIpv6) {
+            if (operation === 'source') {
+                return newSourceInput.value.trim();
+            }
+
+            if (isUsageCap) {
+                return getUsageCapSummary();
+            }
+
+            if (isIpv6) {
+                return getIpv6Summary();
+            }
+
+            return getAccessControlSummary();
+        }
+
         function sleep(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
         }
@@ -812,6 +855,9 @@
                 formData.append('threshold', capThresholdInput.value.trim());
                 formData.append('unit', capUnitSelect.value);
                 formData.append('unblock_time', capUnblockTimeSelect.value);
+            } else if (context.isIpv6) {
+                requestUrl = '?action=batchSetIpv6';
+                formData.append('ipv6_status', ipv6StatusSelect.value);
             } else {
                 requestUrl = '?action=batchSetAccessControl';
                 formData.append('access_type', operation);
@@ -923,6 +969,7 @@
             const newSource = newSourceInput.value.trim();
             const isUsageCap = isUsageCapOperation(operation);
             const isAccessControl = isAccessControlOperation(operation);
+            const isIpv6 = isIpv6Operation(operation);
             const accessValidation = isAccessControl ? normalizeAccessControlRules() : null;
 
             if (operation === 'source' && !newSource) {
@@ -953,7 +1000,7 @@
             document.getElementById('confirmMessage').textContent =
                 operation === 'source' ? '您确定要将以下域名的源站更新为：' : `您确定要为以下域名设置${config.label}：`;
             document.getElementById('confirmNewSource').textContent =
-                operation === 'source' ? newSource : (isUsageCap ? getUsageCapSummary() : getAccessControlSummary());
+                getBatchOperationSummary(operation, isUsageCap, isIpv6);
             document.getElementById('confirmWarning').innerHTML =
                 `<i class="fas fa-info-circle"></i> ${operation === 'source' ? '注意：源站修改可能影响线上服务，请确认操作正确！' : config.warning}`;
             document.getElementById('confirmDomains').innerHTML =
@@ -974,6 +1021,7 @@
             const newSource = newSourceInput.value.trim();
             const isUsageCap = isUsageCapOperation(operation);
             const isAccessControl = isAccessControlOperation(operation);
+            const isIpv6 = isIpv6Operation(operation);
             const accessValidation = isAccessControl ? normalizeAccessControlRules() : null;
 
             // 移除焦点以避免aria-hidden冲突
@@ -998,6 +1046,7 @@
             submitBatchRequests(operation, {
                 newSource,
                 isUsageCap,
+                isIpv6,
                 accessRules: accessValidation ? accessValidation.value : ''
             })
             .then(data => {
